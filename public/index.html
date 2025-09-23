@@ -6,48 +6,111 @@
     <title>AI Playwright Test Generator</title>
     <style>
       body{font-family:system-ui,Segoe UI,Helvetica,Arial;margin:20px}
-      textarea{width:100%;height:120px}
+  textarea{width:100%;height:120px;color:#0b3d91}
       pre{background:#f6f8fa;padding:10px}
+      .btn{font-size:14px;padding:8px 14px}
+      label{display:block;margin-bottom:6px}
+      .codearea{width:100%;height:340px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:12.5px;white-space:pre;tab-size:2}
     </style>
   </head>
   <body>
     <h1>AI Playwright Test Generator</h1>
-    <p>Target site: <a href="https://the-internet.herokuapp.com" target="_blank">the-internet.herokuapp.com</a></p>
+    <p>Target site: <a href="https://the-internet.herokuapp.com" target="_blank">the-internet.herokuapp.com</a>
+      <button id="refresh" style="margin-left:8px">Refresh</button>
+    </p>
     <label>Scenario (natural language):</label>
     <textarea id="scenario">Test the checkboxes</textarea>
     <div style="margin-top:8px">
-      <button id="gen">Generate</button>
-      <button id="run">Generate & Run</button>
+      <button id="gen" class="btn">Generate</button>
+      <button id="run-only" class="btn">Run</button>
+      <button id="genrun" class="btn">Generate & Run</button>
+      <button id="copy-code" class="btn">Copy Code</button>
+      <button id="download-code" class="btn">Download Script</button>
     </div>
 
-    <h3>Generated Test</h3>
-    <pre id="code">(not generated yet)</pre>
+  <h3>Generated Test</h3>
+  <textarea id="code" class="codearea" placeholder="(not generated yet)"></textarea>
 
     <h3>AI Suggestions</h3>
-    <ul id="suggestions"></ul>
+  <ul id="suggestions"></ul>
+  <pre id="suggestions-empty">(not AI suggestions yet)</pre>
 
     <h3>Run Results</h3>
-    <pre id="results">(not run)</pre>
+    <pre id="results">(not run yet)</pre>
 
     <script>
       async function post(path, body) {
         const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         return r.json();
       }
+      document.getElementById('refresh').onclick = () => {
+        location.reload();
+      };
       document.getElementById('gen').onclick = async () => {
         const scenario = document.getElementById('scenario').value;
         const j = await post('/generate', { scenario });
-        document.getElementById('code').textContent = j.code || j.error || '';
+  document.getElementById('code').value = j.code || j.error || '';
         const ul = document.getElementById('suggestions'); ul.innerHTML = '';
         (j.suggestions || []).forEach(s => { const li = document.createElement('li'); li.textContent = s; ul.appendChild(li); });
+        const empty = document.getElementById('suggestions-empty');
+        if ((j.suggestions || []).length === 0) { empty.style.display = 'block'; } else { empty.style.display = 'none'; }
       };
-      document.getElementById('run').onclick = async () => {
-        const scenario = document.getElementById('scenario').value;
-        const j = await post('/generate-and-run', { scenario });
-        document.getElementById('code').textContent = j.code || j.error || '';
-        const ul = document.getElementById('suggestions'); ul.innerHTML = '';
-        (j.suggestions || []).forEach(s => { const li = document.createElement('li'); li.textContent = s; ul.appendChild(li); });
-        document.getElementById('results').textContent = JSON.stringify(j.result || j.error, null, 2);
+      document.getElementById('genrun').onclick = async () => {
+        const genrunBtn = document.getElementById('genrun');
+        const resultsEl = document.getElementById('results');
+        const prevText = genrunBtn.textContent;
+        genrunBtn.textContent = 'Working…';
+        genrunBtn.setAttribute('disabled', 'true');
+        resultsEl.textContent = 'Running…';
+      document.getElementById('copy-code').onclick = async () => {
+        const code = document.getElementById('code').value || '';
+        if (!code || code === '(not generated yet)') return;
+        try { await navigator.clipboard.writeText(code); alert('Code copied to clipboard'); } catch(e) { alert('Copy failed'); }
+      };
+      document.getElementById('download-code').onclick = () => {
+        const code = document.getElementById('code').value || '';
+        if (!code || code === '(not generated yet)') return;
+        const blob = new Blob([code], { type: 'text/javascript' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'test.js';
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+      };
+        try {
+          const scenario = document.getElementById('scenario').value;
+          const j = await post('/generate-and-run', { scenario });
+          document.getElementById('code').value = j.code || j.error || '';
+          const ul = document.getElementById('suggestions'); ul.innerHTML = '';
+          (j.suggestions || []).forEach(s => { const li = document.createElement('li'); li.textContent = s; ul.appendChild(li); });
+          const empty = document.getElementById('suggestions-empty');
+          if ((j.suggestions || []).length === 0) { empty.style.display = 'block'; } else { empty.style.display = 'none'; }
+          resultsEl.textContent = JSON.stringify(j.result || j.error, null, 2);
+        } finally {
+          genrunBtn.textContent = prevText;
+          genrunBtn.removeAttribute('disabled');
+        }
+      };
+      document.getElementById('run-only').onclick = async () => {
+        const runBtn = document.getElementById('run-only');
+        const resultsEl = document.getElementById('results');
+        const codeEl = document.getElementById('code');
+        const code = codeEl.value || '';
+        if (!code || code.trim() === '') {
+          resultsEl.textContent = 'No code to run. Click Generate first.';
+          return;
+        }
+        const prevText = runBtn.textContent;
+        runBtn.textContent = 'Running…';
+        runBtn.setAttribute('disabled', 'true');
+        resultsEl.textContent = 'Running…';
+        try {
+          const j = await post('/run', { code });
+          resultsEl.textContent = JSON.stringify(j || {}, null, 2);
+        } finally {
+          runBtn.textContent = prevText;
+          runBtn.removeAttribute('disabled');
+        }
       };
     </script>
   </body>
