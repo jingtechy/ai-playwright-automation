@@ -28,6 +28,7 @@ export const config = {
   LOCAL_LLM_MODEL: process.env.LOCAL_LLM_MODEL ?? 'llama3.1:8b',
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? '',
   PORT: process.env.PORT ? Number(process.env.PORT) : 3000,
+  TARGET_SITE: process.env.TARGET_SITE ?? 'https://the-internet.herokuapp.com',
 };
 
 export type Config = typeof config;

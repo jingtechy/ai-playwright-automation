@@ -3,23 +3,25 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>AI Playwright Test Generator</title>
+    <title>AI Playwright Test Generator and Runner</title>
     <style>
       body{font-family:system-ui,Segoe UI,Helvetica,Arial;margin:20px}
   textarea{width:100%;height:120px;color:#0b3d91}
+  #scenario{height:80px}
       pre{background:#f6f8fa;padding:10px}
       .btn{font-size:14px;padding:8px 14px}
       label{display:block;margin-bottom:6px}
       .codearea{width:100%;height:340px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono','Courier New',monospace;font-size:12.5px;white-space:pre;tab-size:2}
+  #results{max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word;padding-bottom:24px}
     </style>
   </head>
   <body>
-    <h1>AI Playwright Test Generator</h1>
-    <p>Target site: <a href="https://the-internet.herokuapp.com" target="_blank">the-internet.herokuapp.com</a>
+    <h1>AI Playwright Test Generator and Runner</h1>
+    <p>Target site: <a id="target-link" href="#" target="_blank">(loading target site)</a>
       <button id="refresh" style="margin-left:8px">Refresh</button>
     </p>
     <label>Scenario (natural language):</label>
-    <textarea id="scenario">Test the checkboxes</textarea>
+  <textarea id="scenario" placeholder="Please enter your test scenario (e.g. 'verify dropdown selection')"></textarea>
     <div style="margin-top:8px">
       <button id="gen" class="btn">Generate</button>
       <button id="run-only" class="btn">Run</button>
@@ -46,14 +48,41 @@
       document.getElementById('refresh').onclick = () => {
         location.reload();
       };
+      // Load config for target site
+      (async () => {
+        try {
+          const cfg = await fetch('/config').then(r => r.json());
+          if (cfg.targetSite) {
+            const u = new URL(cfg.targetSite);
+            const link = document.getElementById('target-link');
+            link.href = cfg.targetSite;
+            link.textContent = u.host;
+          }
+        } catch(e) {
+          // ignore
+        }
+      })();
       document.getElementById('gen').onclick = async () => {
-        const scenario = document.getElementById('scenario').value;
-        const j = await post('/generate', { scenario });
-  document.getElementById('code').value = j.code || j.error || '';
-        const ul = document.getElementById('suggestions'); ul.innerHTML = '';
-        (j.suggestions || []).forEach(s => { const li = document.createElement('li'); li.textContent = s; ul.appendChild(li); });
-        const empty = document.getElementById('suggestions-empty');
-        if ((j.suggestions || []).length === 0) { empty.style.display = 'block'; } else { empty.style.display = 'none'; }
+        const genBtn = document.getElementById('gen');
+        const codeEl = document.getElementById('code');
+        const prevText = genBtn.textContent;
+        genBtn.textContent = 'Generating…';
+        genBtn.setAttribute('disabled', 'true');
+        codeEl.value = '(generating...)';
+        try {
+          const scenario = document.getElementById('scenario').value;
+          const j = await post('/generate', { scenario });
+          codeEl.value = j.code || j.error || '';
+          const ul = document.getElementById('suggestions'); ul.innerHTML = '';
+          (j.suggestions || []).forEach(s => { const li = document.createElement('li'); li.textContent = s; ul.appendChild(li); });
+          const empty = document.getElementById('suggestions-empty');
+          if ((j.suggestions || []).length === 0) { empty.style.display = 'block'; } else { empty.style.display = 'none'; }
+        } catch (e) {
+          codeEl.value = 'Error generating test: ' + (e && e.message ? e.message : e);
+        } finally {
+          genBtn.textContent = prevText;
+          genBtn.removeAttribute('disabled');
+        }
       };
       document.getElementById('genrun').onclick = async () => {
         const genrunBtn = document.getElementById('genrun');

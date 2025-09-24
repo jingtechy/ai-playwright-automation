@@ -7,10 +7,16 @@ import { generateTest } from './testGenerator';
 import { runPlaywrightTest } from './runner';
 import { aiSuggest } from './aiAdapter';
 import fetch from 'cross-fetch';
+import { config } from './config';
 
 const app = express();
 app.use(bodyParser.json());
 app.use(express.static(path.join(process.cwd(), 'public')));
+
+// Simple config endpoint for client consumption
+app.get('/config', (_req, res) => {
+  res.json({ targetSite: config.TARGET_SITE });
+});
 
 app.post('/generate', async (req, res) => {
   const { scenario } = req.body;
