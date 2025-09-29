@@ -73,6 +73,44 @@ Notes:
 - The LLM adapter will try multiple shapes and 127.0.0.1 fallbacks automatically when `LOCAL_LLM_URL` points to a base host.
 - If no LLM is reachable, a minimal rule‑based fallback script is returned.
 
+## Local LLM Setup (Ollama example)
+
+Default Ollama service address: `http://localhost:11434`  
+Native generate endpoint: `http://localhost:11434/api/generate`  
+OpenAI‑compatible endpoints (if enabled): `http://localhost:11434/v1/chat/completions` and `/v1/completions`
+
+1. Install Ollama  
+	```sh
+	brew install ollama
+	```
+    After installation, sanity check:
+    ```sh
+	ollama --version
+	``` 
+2. Pull a model (pick one that fits your RAM/VRAM).  
+	```sh
+	ollama pull llama3.1:8b
+	```
+3. Test a quick prompt:  
+	```sh
+	ollama run llama3.1:8b "Say hi"
+	```
+4. Set your `.env` (or export vars):  
+	```
+	LOCAL_LLM_URL=http://localhost:11434/api/generate
+	LOCAL_LLM_MODEL=llama3.1:8b
+	```
+5. Restart the dev server. The app will now first try the local model before any OpenAI fallback.
+
+Health check (optional):
+```sh
+curl -sS http://localhost:11434/api/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"llama3.1:8b","prompt":"test","stream":false}' | jq .response
+```
+
+If you prefer an OpenAI‑compatible local server (e.g. LM Studio), just point `LOCAL_LLM_URL` to its `/v1/chat/completions` (or `/v1/completions`) endpoint and use the UI’s listed model name in `LOCAL_LLM_MODEL`.
+
 ## Run
 
 Dev mode (auto‑reload server):
