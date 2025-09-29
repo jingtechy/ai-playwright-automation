@@ -2,6 +2,12 @@
 
 Generate end‑to‑end Playwright tests from natural‑language scenarios, edit them inline, and run them in one click. Works with local LLMs (Ollama or OpenAI‑compatible APIs) and optionally OpenAI as a fallback.
 
+## Demo
+
+![Demo of generating and running a test](./demo.gif)
+
+*The UI: enter a scenario, generate code, optionally run immediately, view output and suggestions.*
+
 ## Features
 
 - Natural‑language to code: Sends your scenario to an LLM and returns a runnable Playwright script (CommonJS).
