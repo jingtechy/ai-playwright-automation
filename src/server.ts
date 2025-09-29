@@ -6,7 +6,6 @@ dotenv.config();
 import { generateTest } from './testGenerator';
 import { runPlaywrightTest } from './runner';
 import { aiSuggest } from './aiAdapter';
-import fetch from 'cross-fetch';
 import { config } from './config';
 
 const app = express();
@@ -52,35 +51,6 @@ app.post('/generate-and-run', async (req, res) => {
   }
 });
 
-// Debug endpoint to probe local LLM connectivity from the server process
-app.get('/debug/llm', async (_req, res) => {
-  const base = (process.env.LOCAL_LLM_URL || '').replace(/\/$/, '');
-  if (!base) return res.json({ error: 'LOCAL_LLM_URL not set' });
-  const model = process.env.LOCAL_LLM_MODEL || 'llama3.1:8b';
-  const isOpenAI = /\/v1\//.test(base);
-  const hostBase = isOpenAI ? base.replace(/\/v1\/(chat\/completions|completions)$/,'') : base;
-  const hostBase127 = hostBase.replace('://localhost', '://127.0.0.1');
-  const endpoints: Array<{ url: string; kind: string; body: any }> = [];
-  if (isOpenAI) {
-    endpoints.push({ url: base, kind: 'openai-chat', body: { model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 10 } });
-  }
-  endpoints.push({ url: hostBase + '/v1/completions', kind: 'openai-completions', body: { model, prompt: 'ping', max_tokens: 10 } });
-  endpoints.push({ url: hostBase + '/api/generate', kind: 'ollama', body: { model, prompt: 'ping', stream: false } });
-  endpoints.push({ url: hostBase127 + '/v1/completions', kind: 'openai-completions-127', body: { model, prompt: 'ping', max_tokens: 10 } });
-  endpoints.push({ url: hostBase127 + '/api/generate', kind: 'ollama-127', body: { model, prompt: 'ping', stream: false } });
-
-  const results = [] as any[];
-  for (const e of endpoints) {
-    try {
-      const r = await fetch(e.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e.body) });
-      const text = await r.text();
-      results.push({ url: e.url, kind: e.kind, status: r.status, ok: r.ok, snippet: text.slice(0, 300) });
-    } catch (err: any) {
-      results.push({ url: e.url, kind: e.kind, error: String(err) });
-    }
-  }
-  res.json({ base: process.env.LOCAL_LLM_URL, model, results });
-});
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {

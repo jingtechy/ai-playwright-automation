@@ -10,55 +10,68 @@ function sanitizeCode(raw: string): string {
   return raw.replace(/^```[a-zA-Z]*\s*/,'').replace(/\s*```$/,'').trim();
 }
 
-function normalizePlaywrightCode(code: string, scenario: string): string {
+function normalizePlaywrightCode(code: string, _scenario: string): string {
   let out = code.trim();
 
-  // 1. Strip surrounding code fences if they slipped through
-  out = out.replace(/^```(?:[a-zA-Z]+)?\n?/, '').replace(/```$/,'').trim();
+  // Strip code fences
+  out = out.replace(/^```(?:[a-zA-Z]+)?\n?/, '').replace(/```$/, '').trim();
 
-  // 2. Ensure required import
-  if (!/require\(['"]playwright['"]\)/.test(out)) {
-    out = `const { chromium } = require('playwright');\n` + out;
+  const hasChromiumImport = /require\(['"]playwright['"]\)/.test(out);
+  const hasAssertImport = /require\(['"]assert['"]\)/.test(out);
+  const hasIIFE = /\(async \(\) =>/.test(out);
+
+  // Ensure imports (prepend once)
+  if (!hasChromiumImport) out = `const { chromium } = require('playwright');\n` + out;
+  if (!hasAssertImport) out = `const assert = require('assert');\n` + out;
+
+  // Wrap if no IIFE present
+  if (!hasIIFE) {
+    const body = out;
+    out = `const { chromium } = require('playwright');\n` +
+          (hasAssertImport ? '' : `const assert = require('assert');\n`) +
+          `\n(async () => {\n  const browser = await chromium.launch({ headless: false });\n  const context = await browser.newContext();\n  const page = await context.newPage();\n${indentBody(body)}\n  await browser.close();\n})();`;
   }
 
-  // 3. Ensure the script is wrapped in an async IIFE for top-level await usage
-  if (!/\(async \(\) =>/.test(out)) {
-    // If script already declares const browser/page, just wrap; else create skeleton
-    if (/chromium\.launch\(/.test(out)) {
-      out = `const { chromium } = require('playwright');\n(async () => {\n${indentBody(out)}\n})();`;
-    } else {
-      out = `const { chromium } = require('playwright');\n(async () => {\n  const browser = await chromium.launch();\n  const page = await browser.newPage();\n  ${out.split('\n').join('\n  ')}\n  await browser.close();\n})();`;
-    }
+  // Guarantee browser launch has headless: false
+  out = out.replace(/chromium\.launch\(\s*\)/g, 'chromium.launch({ headless: false })');
+  if (!/chromium\.launch\([^)]*headless:\s*false/.test(out)) {
+    out = out.replace(/chromium\.launch\(/, 'chromium.launch({ headless: false, ');
   }
 
-  // 4. Guarantee browser & page objects exist inside IIFE
-  if (!/const\s+browser\s*=\s*await\s+chromium\.launch/.test(out)) {
-    out = out.replace(/\(async \(\) => \{/, '(async () => {\n  const browser = await chromium.launch();');
+  // Ensure context & page creation inside IIFE
+  if (!/await\s+browser\.newContext\(/.test(out)) {
+    out = out.replace(/const\s+browser[^\n]*\n/, m => m + '  const context = await browser.newContext();\n');
   }
-  if (!/const\s+page\s*=\s*await\s+browser\.newPage/.test(out)) {
-    out = out.replace(/const\s+browser[^\n]*\n/, (m) => m + '  const page = await browser.newPage();\n');
+  // Replace any browser.newPage() with context.newPage()
+  out = out.replace(/await\s+browser\.newPage\(/g, 'await context.newPage(');
+  if (!/const\s+page\s*=\s*await\s+context\.newPage\(/.test(out)) {
+    out = out.replace(/const\s+context[^\n]*\n/, m => m + '  const page = await context.newPage();\n');
   }
   if (!/await\s+browser\.close\(\)/.test(out)) {
     out = out.replace(/\}\)\(\);?\s*$/, '  await browser.close();\n})();');
   }
 
-  // 5. Normalize relative goto paths to absolute using configured target site
+  // Normalize relative goto paths
   const base = config.TARGET_SITE.replace(/\/$/, '');
   out = out.replace(/await\s+page\.goto\(['"]\/(.+?)['"]\)/g, (_m, p1) => `await page.goto('${base}/${p1}')`);
 
-  // 6. Add a wait for load if missing after first navigation
+  // Insert initial load wait if none present anywhere
   out = out.replace(/(await\s+page\.goto\([^\n]+\);)(?![\s\S]*?waitForLoadState)/, '$1\n  await page.waitForLoadState("domcontentloaded");');
+  out = out.replace(/waitForLoadState\((['"])networkidle0\1\)/g, 'waitForLoadState("networkidle")')
+           .replace(/waitForLoadState\((['"])networkidle2\1\)/g, 'waitForLoadState("networkidle")');
 
-  // 7. Add waits before click/fill/select when direct interaction without prior waitForSelector
+  // Add waits before interactions & text reads
   out = addImplicitWaits(out);
+  out = addTextReadWaits(out);
 
-  // 8. Standardize console logs for assertions: replace bare booleans with labeled outputs
+  // Standardize a simple isChecked console log pattern
   out = out.replace(/console\.log\((await\s+page\.isChecked\([^)]*\))\)/g, 'console.log("IS_CHECKED=" + ($1))');
 
-  // 9. Deduplicate repeated imports or IIFE wrappers (basic cleanup)
-  out = out.replace(/^(?:const { chromium } = require\('playwright'\);\n){2,}/, "const { chromium } = require('playwright');\n");
+  // Remove accidental duplicate import lines (small safety net)
+  out = out.replace(/^(const \{ chromium \} = require\('playwright'\);\n)(?:const \{ chromium \} = require\('playwright'\);\n)+/m, '$1');
+  out = out.replace(/^(const assert = require\('assert'\);\n)(?:const assert = require\('assert'\);\n)+/m, '$1');
 
-  // 10. Deduplicate multiple page declarations (keep context-based one if present)
+  // Deduplicate multiple page declarations
   out = dedupePageDeclarations(out);
 
   return out.trim();
@@ -73,13 +86,61 @@ function addImplicitWaits(code: string): string {
   const newLines: string[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const clickMatch = line.match(/await\s+page\.(click|fill|check|uncheck|selectOption)\(([^)]+)\)/);
-    if (clickMatch) {
-      const selectorPart = clickMatch[2].split(',')[0].trim();
-      // Only add wait if previous two lines do not already wait for this selector
-      const prevWindow = newLines.slice(-2).join('\n');
-      if (!new RegExp(`waitForSelector\\(${escapeRegExp(selectorPart)}`).test(prevWindow)) {
-        newLines.push(`  await page.waitForSelector(${selectorPart});`);
+    const head = line.match(/await\s+page\.(click|fill|check|uncheck|selectOption)\(/);
+    if (head) {
+      const startIdx = line.indexOf(head[0]) + head[0].length;
+      const selectorPart = extractFirstArgument(line, startIdx);
+      if (selectorPart) {
+        const prevWindow = newLines.slice(-3).join('\n');
+        if (!new RegExp(`waitForSelector\\(${escapeRegExp(selectorPart)}`).test(prevWindow)) {
+          newLines.push(`  await page.waitForSelector(${selectorPart});`);
+        }
+      }
+    }
+    newLines.push(line);
+  }
+  return newLines.join('\n');
+}
+
+// Extracts the first argument substring starting just after the opening '('
+// Handles quotes, escapes, and nested parentheses like :nth-child(1)
+function extractFirstArgument(line: string, startIdx: number): string | null {
+  let argText = '';
+  let inQuote: string | null = null;
+  let escaped = false;
+  let depth = 0;
+  for (let j = startIdx; j < line.length; j++) {
+    const ch = line[j];
+    if (inQuote) {
+      argText += ch;
+      if (ch === inQuote && !escaped) inQuote = null;
+      escaped = ch === '\\' && !escaped;
+      continue;
+    }
+    if (ch === '"' || ch === '\'' || ch === '`') { inQuote = ch; argText += ch; escaped = false; continue; }
+    if (ch === '(') { depth++; argText += ch; continue; }
+    if (ch === ')') { if (depth === 0) break; depth--; argText += ch; continue; }
+    if (ch === ',' && depth === 0) break;
+    argText += ch;
+  }
+  const first = argText.trim();
+  return first ? first : null;
+}
+
+function addTextReadWaits(code: string): string {
+  const lines = code.split('\n');
+  const newLines: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const head = line.match(/await\s+page\.(textContent|innerText)\(/);
+    if (head) {
+      const startIdx = line.indexOf(head[0]) + head[0].length;
+      const selectorPart = extractFirstArgument(line, startIdx);
+      if (selectorPart) {
+        const prevWindow = newLines.slice(-3).join('\n');
+        if (!new RegExp(`waitForSelector\\(${escapeRegExp(selectorPart)}`).test(prevWindow)) {
+          newLines.push(`  await page.waitForSelector(${selectorPart});`);
+        }
       }
     }
     newLines.push(line);
@@ -116,8 +177,8 @@ export async function generateTest(scenario: string): Promise<string> {
   const aiRaw = await aiGenerate(prompt);
   const aiOut = sanitizeCode(aiRaw);
   if (aiOut.includes('AI fallback') || !aiOut.trim()) {
-    // generic fallback
-    return `const { chromium } = require('playwright');\n(async () => {\n  const browser = await chromium.launch();\n  const page = await browser.newPage();\n  await page.goto('${config.TARGET_SITE}');\n  console.log('FALLBACK_TEST');\n  await browser.close();\n})();`;
+    // generic fallback aligned with preferred style (visible browser + context)
+    return `const { chromium } = require('playwright');\nconst assert = require('assert');\n(async () => {\n  const browser = await chromium.launch({ headless: false });\n  const context = await browser.newContext();\n  const page = await context.newPage();\n  await page.goto('${config.TARGET_SITE}');\n  await page.waitForLoadState("domcontentloaded");\n  console.log('FALLBACK_TEST');\n  await browser.close();\n})();`;
   }
   return normalizePlaywrightCode(aiOut, scenario);
 }

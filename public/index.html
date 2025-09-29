@@ -30,7 +30,10 @@
       <button id="download-code" class="btn">Download Script</button>
     </div>
 
-  <h3>Generated Test</h3>
+  <div style="display:flex;align-items:center;gap:20px;margin-top:16px;margin-bottom:10px;">
+    <h3 style="margin:0;">Generated Test</h3>
+    <button id="clear-code" class="btn" style="padding:4px 10px;font-size:12px;">Clear</button>
+  </div>
   <textarea id="code" class="codearea" placeholder="(not generated yet)"></textarea>
 
     <h3>AI Suggestions</h3>
@@ -139,6 +142,12 @@
         } finally {
           runBtn.textContent = prevText;
           runBtn.removeAttribute('disabled');
+        }
+      };
+      document.getElementById('clear-code').onclick = () => {
+        const codeEl = document.getElementById('code');
+        if (codeEl) {
+          codeEl.value = '';
         }
       };
     </script>
